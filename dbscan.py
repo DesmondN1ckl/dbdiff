@@ -55,21 +55,24 @@ def open_db(db, key=None):
     if key is not None:
         key = sanitize_key(key)
         cur.execute(f'PRAGMA key = \'{key}\'')
-        tables = get_tables(con) # Attempt fetching something from the db to test the key 
+        get_tables(con) # Attempt fetching something from the db to test the key, discards results.
 
     cur.close()
     return con
 
-def get_tables(con):
+def execute_sql(con, sql):
     cur = con.cursor()
-    tables = cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    result = cur.execute(sql).fetchall()
     cur.close()
-    return tables
+    return result
 
+def get_tables(con):
+    result = execute_sql(con, "SELECT name FROM sqlite_master WHERE type='table'")
+    tables = [tables[0] for tables in result]
+    return tables
 
 def main():
     args = parse_args()
-
     if args.key is not None:
         key = args.key
     elif args.key_file is not None:
@@ -78,10 +81,20 @@ def main():
         key = None
 
 
-    connections = []
-
+    conns = []
     for db_path in args.dbs:
-        connections.append(open_db(pathlib.Path(db_path), key=key))
+        conns.append(open_db(pathlib.Path(db_path), key=key))
+
+    tables = []
+    for con in conns:
+        tables.append(get_tables(con))
+
+    shared_tables = set(tables[0])
+    for table in tables[1:]:
+        shared_tables &= set(table)
+
+    print(tables)    
+    print(shared_tables)
     
 
 if __name__ == "__main__":
