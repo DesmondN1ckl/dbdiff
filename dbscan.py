@@ -48,8 +48,20 @@ def read_key(path):
 def sanitize_key(key):
     return key.replace("'", "''")
 
-def flatten_output(output):
-    return [result[0] for result in output]
+def flatten_output(input):
+    return [result[0] for result in input]
+
+def cast_value(input):
+    try:
+        return int(input)
+    except:
+        try:
+            return float(input)
+        except:
+            return input
+
+def quote_identifier(input: str):
+    return '"' + input.replace('"','""') + '"'   
 
 def open_db(db, key=None):
     con = sqlcipher3.connect(db)
@@ -83,7 +95,7 @@ def find_shared_tables(tables):
     return shared_tables
 
 def get_columns(con, table):
-    result = execute_sql(con, f'SELECT name FROM pragma_table_info(?)', params=(table,)) # trailing , needed to make it a tuple
+    result = execute_sql(con, 'SELECT name FROM pragma_table_info(?)', params=(table,)) # trailing ',' needed to make it a tuple
     return flatten_output(result)
 
 def find_shared_columns(conns, shared_tables):
@@ -105,6 +117,51 @@ def find_shared_columns(conns, shared_tables):
 
     return shared_columns_by_db
 
+def find_pk(con, table):
+    result = execute_sql(con, 'SELECT name, pk FROM pragma_table_info(?)', params=(table,)) # trailing ',' needed to make it a tuple
+    pk = None
+
+    for row in result:
+        if row[1] == 1:
+            pk = row[0]
+
+    return pk
+
+def scan_candidates(con, table, value):
+    data = execute_sql(con, f'SELECT * FROM {quote_identifier(table)}')
+    columns = get_columns(con, table)
+    pk = find_pk(con, table)
+
+    results: list[dict] = []
+
+    # print("Data:", data)
+    # print("Columns:", columns)
+    # print("PK:", pk)
+
+    for i in range(len(columns)):
+        if columns[i] == pk:
+            pk_index = i
+
+    for row_num in range(len(data)):
+        # print("Row:", data[row_num])
+
+        for column_num in range(len(data[row_num])):
+            # print("Cell:", data[row_num][column_num])
+
+            if data[row_num][column_num] == value:
+                newdict = {}
+
+                newdict['pk_column'] = pk
+                newdict['pk_value'] = data[row_num][pk_index]
+                newdict['column'] = columns[column_num]
+                newdict['value'] = value
+
+                # print("Dict:", newdict)
+                results.append(newdict)
+
+    return results
+
+
 def main():
     args = parse_args()
     if args.key is not None:
@@ -114,7 +171,6 @@ def main():
     else:
         key = None
 
-
     connections = []
     for db_path in args.dbs:
         connections.append(open_db(pathlib.Path(db_path), key=key))
@@ -123,15 +179,21 @@ def main():
     for i in range(len(connections)):
         tables_by_db[i] = (get_tables(connections[i]))
 
-    print("Tables by db", tables_by_db)
+    # print("Tables by db", tables_by_db)
     
     shared_tables = find_shared_tables(tables_by_db)
-    print("Shared tables:", shared_tables)
-    
-    shared_columns = find_shared_columns(connections, shared_tables)
-    print("Shared columns:", shared_columns)
 
-    # print("Tables by db:", tables_by_db)    
+    print("Shared tables:", shared_tables)
+    # print("Shared columns:", shared_columns)
+    # print("Tables by db:", tables_by_db)   
+    
+    for i in range(len(connections)):
+        for table in shared_tables:
+            # print(i)
+            # print(table)
+            print(scan_candidates(connections[i], table, cast_value(args.values[i])))
+     
+
 
     for con in connections:
         con.close()
